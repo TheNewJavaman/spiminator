@@ -1,0 +1,8 @@
+[package]
+name = "spiminator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = "1.0.56"
+num_enum = "0.7.2"
