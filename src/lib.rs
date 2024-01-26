@@ -13,16 +13,16 @@ impl Cpu {
 
     fn try_handle_insn_reg(&mut self, insn: &RegInsn) -> Result<(), InsnError> {
         if let Reg::Zero = insn.rd {
-            return Err(InsnError::DstRegZero);
+            return Err(InsnError::DstRegZeroError);
         }
 
         let rs_u: u32 = self.regs[insn.rs as usize];
         let rt_u: u32 = self.regs[insn.rt as usize];
         let rd_u: &mut u32 = &mut self.regs[insn.rd as usize];
 
-        let rs_i: i32 = unsafe { std::mem::transmute(rs_u) };
-        let rt_i: i32 = unsafe { std::mem::transmute(rt_u) };
-        let rd_i: &mut i32 = unsafe { std::mem::transmute(rd_u) };
+        let rs_i: i32 = unsafe { std::mem::transmute_copy(&rs_u) };
+        let rt_i: i32 = unsafe { std::mem::transmute_copy(&rt_u) };
+        let rd_i: &mut i32 = unsafe { std::mem::transmute_copy(&rd_u) };
 
         match &insn.funct {
             RegFunc::Sll => *rd_u = rt_u << insn.shamt,
@@ -66,8 +66,8 @@ impl Cpu {
         let rs_u: u32 = self.regs[insn.rs as usize];
         let rt_u: &mut u32 = &mut self.regs[insn.rt as usize];
 
-        let rs_i: i32 = unsafe { std::mem::transmute(rs_u) };
-        let rt_i: &mut i32 = unsafe { std::mem::transmute(rt_u) };
+        let rs_i: i32 = unsafe { std::mem::transmute_copy(&rs_u) };
+        let rt_i: &mut i32 = unsafe { std::mem::transmute_copy(&rt_u) };
 
         match &insn.opcode {
             ImmOpcode::AddI => {
@@ -84,9 +84,9 @@ impl Cpu {
                     return Err(InsnError::IntegerOverflowException);
                 }
             }
-            ImmOpcode::AndI => *rt_u = rs_u & insn.data,
-            ImmOpcode::OrI => *rt_u = rs_u | insn.data,
-            ImmOpcode::XorI => *rt_u = rs_u ^ insn.data,
+            ImmOpcode::AndI => *rt_u = rs_u & (insn.data as u32),
+            ImmOpcode::OrI => *rt_u = rs_u | (insn.data as u32),
+            ImmOpcode::XorI => *rt_u = rs_u ^ (insn.data as u32),
             ImmOpcode::LuI => *rt_u = (insn.data as u32) << 16,
         }
 
@@ -96,11 +96,11 @@ impl Cpu {
 
 #[derive(Debug, thiserror::Error)]
 enum InsnError {
-    #[error("integer overflow exception")]
+    #[error("integer overflow")]
     IntegerOverflowException,
 
     #[error("destination register is $zero")]
-    DstRegZero,
+    DstRegZeroError,
 }
 
 #[derive(Debug)]
