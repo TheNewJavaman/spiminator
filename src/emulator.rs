@@ -1,35 +1,26 @@
 use num_enum::{TryFromPrimitive, UnsafeFromPrimitive};
+use std::collections::HashMap;
 use std::mem::transmute;
 
-struct Cpu {
+#[derive(Debug)]
+struct Computer {
     regs: [u32; 32],
-    pc: u32,
+    program: Vec<Insn>,
+    /// Direct index into `program`, not a byte offset
+    pc: usize,
+    mem: HashMap<u32, u32>,
 }
 
-impl Cpu {
-    fn ru(&self, reg: Reg) -> u32 {
-        self.regs[reg as usize]
-    }
-
-    fn ri(&self, reg: Reg) -> i32 {
-        unsafe { transmute(self.regs[reg as usize]) }
-    }
-
-    fn ru_mut(&mut self, reg: Reg) -> Result<&mut u32, InsnError> {
-        match reg {
-            Reg::Zero => Err(InsnError::RegMutZero),
-            r => Ok(&mut self.regs[r as usize]),
+impl Computer {
+    fn run(&mut self) -> Result<(), InsnError> {
+        let mut exit = false;
+        while self.pc < self.program.len() && !exit {
+            self.try_handle_insn(self.program[self.pc], &mut exit)?;
         }
+        Ok(())
     }
 
-    fn ri_mut(&mut self, reg: Reg) -> Result<&mut i32, InsnError> {
-        match reg {
-            Reg::Zero => Err(InsnError::RegMutZero),
-            r => unsafe { Ok(transmute(&mut self.regs[r as usize])) },
-        }
-    }
-
-    fn try_handle_insn(&mut self, insn: Insn) -> Result<(), InsnError> {
+    fn try_handle_insn(&mut self, insn: Insn, exit: &mut bool) -> Result<(), InsnError> {
         match insn.opcode()? {
             Opcode::Reg => match insn.funct()? {
                 Funct::Sll => *self.ru_mut(insn.rd())? = self.ru(insn.rt()) << insn.shamt(),
@@ -38,6 +29,13 @@ impl Cpu {
                 Funct::SrlV => *self.ru_mut(insn.rd())? = self.ru(insn.rt()) >> self.ru(insn.rs()),
                 Funct::Sra => *self.ri_mut(insn.rd())? = self.ri(insn.rt()) >> insn.shamt(),
                 Funct::SraV => *self.ri_mut(insn.rd())? = self.ri(insn.rt()) >> self.ri(insn.rs()),
+                Funct::Syscall => {
+                    let code = SyscallCode::try_from_primitive(self.ru(Reg::V0))
+                        .map_err(|e| InsnError::UnsupportedSyscall(e.number))?;
+                    match code {
+                        SyscallCode::Exit => *exit = true,
+                    }
+                }
                 Funct::Add => {
                     let (val, overflow) = self.ri(insn.rs()).overflowing_add(self.ri(insn.rt()));
                     *self.ri_mut(insn.rd())? = val;
@@ -85,7 +83,31 @@ impl Cpu {
             Opcode::LuI => *self.ru_mut(insn.rd())? = insn.du() << 16,
         }
 
+        self.pc += 1;
+
         Ok(())
+    }
+
+    fn ru(&self, reg: Reg) -> u32 {
+        self.regs[reg as usize]
+    }
+
+    fn ri(&self, reg: Reg) -> i32 {
+        unsafe { transmute(self.regs[reg as usize]) }
+    }
+
+    fn ru_mut(&mut self, reg: Reg) -> Result<&mut u32, InsnError> {
+        match reg {
+            Reg::Zero => Err(InsnError::RegMutZero),
+            r => Ok(&mut self.regs[r as usize]),
+        }
+    }
+
+    fn ri_mut(&mut self, reg: Reg) -> Result<&mut i32, InsnError> {
+        match reg {
+            Reg::Zero => Err(InsnError::RegMutZero),
+            r => unsafe { Ok(transmute(&mut self.regs[r as usize])) },
+        }
     }
 }
 
@@ -188,6 +210,7 @@ enum Funct {
     SrlV = 0b000110,
     Sra = 0b000011,
     SraV = 0b000111,
+    Syscall = 0b001100,
     Add = 0b100000,
     AddU = 0b100001,
     Sub = 0b100010,
@@ -196,6 +219,12 @@ enum Funct {
     Or = 0b100101,
     Xor = 0b100110,
     Nor = 0b100111,
+}
+
+#[derive(Copy, num_enum::TryFromPrimitive, num_enum::IntoPrimitive)]
+#[repr(u32)]
+enum SyscallCode {
+    Exit = 10,
 }
 
 #[derive(thiserror::Error)]
@@ -211,4 +240,7 @@ enum InsnError {
 
     #[error("invalid funct {0:#b}")]
     InvalidFunct(u32),
+
+    #[error("unsupported syscall $v0={0}")]
+    UnsupportedSyscall(u32),
 }
